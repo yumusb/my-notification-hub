@@ -1,7 +1,7 @@
 import { kv } from "@vercel/kv";
 import { NextRequest, NextResponse } from "next/server";
 
-export async function DELETE(request: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
     const subscription = await request.json();
     if (!subscription || !subscription.endpoint) {
