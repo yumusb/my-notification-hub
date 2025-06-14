@@ -31,21 +31,25 @@ export async function POST(request: NextRequest) {
     let failCount = 0;
     let skipCount = 0;
 
-    const pushPromises = allSubscriptionStrings.map(async subStr => {
-      let subscription;
+    const pushPromises = allSubscriptionStrings.map(async (subRaw: unknown) => {
+      let subscription: any;
 
-      if (typeof subStr === "string") {
+      if (typeof subRaw === "string") {
         try {
-          subscription = JSON.parse(subStr);
+          subscription = JSON.parse(subRaw);
         } catch (e) {
-          console.error("Skipping invalid JSON subscription:", subStr);
+          console.error("Skipping invalid JSON subscription:", subRaw);
           skipCount++;
           return;
         }
-      } else if (typeof subStr === "object" && subStr.endpoint) {
-        subscription = subStr;
+      } else if (
+        typeof subRaw === "object" &&
+        subRaw !== null &&
+        "endpoint" in subRaw
+      ) {
+        subscription = subRaw;
       } else {
-        console.error("Skipping unrecognized subscription format:", subStr);
+        console.error("Skipping unrecognized subscription format:", subRaw);
         skipCount++;
         return;
       }
@@ -63,6 +67,7 @@ export async function POST(request: NextRequest) {
         failCount++;
       }
     });
+
 
     await Promise.all(pushPromises);
 
