@@ -90,7 +90,7 @@ self.addEventListener("notificationclick", (event) => {
       const matchingClient = clientList.find(client => {
         const clientUrl = new URL(client.url);
         const targetUrl = new URL(urlToOpen);
-        return clientUrl.pathname === targetUrl.pathname;
+        return clientUrl === targetUrl;
       });
       if (matchingClient) {
         console.log("Found matching client, focusing it");
