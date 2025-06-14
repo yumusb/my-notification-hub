@@ -53,7 +53,6 @@ self.addEventListener("push", (event) => {
       {
         action: "open",
         title: "查看 👀",
-        // emoji 不支持直接作为 icon 字段，但可以放在标题里表现
       },
       {
         action: "dismiss",
@@ -69,7 +68,13 @@ self.addEventListener("notificationclick", (event) => {
   event.notification.close();
 
   const action = event.action;
-  const urlToOpen = event.notification.data?.url || "/";
+  const notificationData = event.notification.data || {};
+  let urlToOpen = notificationData.url || '/';
+
+  // 确保 URL 是绝对路径
+  if (urlToOpen.startsWith('/')) {
+    urlToOpen = self.location.origin + urlToOpen;
+  }
 
   if (action === "dismiss") {
     console.log("Notification dismissed by user");
@@ -77,13 +82,20 @@ self.addEventListener("notificationclick", (event) => {
   }
 
   event.waitUntil(
-    clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
-      for (const client of clientList) {
-        if (client.url === urlToOpen && "focus" in client) {
-          return client.focus();
-        }
-      }
-      if (clients.openWindow) {
+    clients.matchAll({
+      type: "window",
+      includeUncontrolled: true
+    }).then((clientList) => {
+      // 检查是否有匹配的客户端
+      const matchingClient = clientList.find(client => {
+        const clientUrl = new URL(client.url);
+        const targetUrl = new URL(urlToOpen);
+        return clientUrl.pathname === targetUrl.pathname;
+      });
+
+      if (matchingClient) {
+        return matchingClient.focus();
+      } else {
         return clients.openWindow(urlToOpen);
       }
     })
