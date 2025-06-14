@@ -19,32 +19,33 @@ export async function POST(request: NextRequest) {
   }
 
   if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
-      return new Response("VAPID keys are not configured.", { status: 500 });
+    return new Response("VAPID keys are not configured.", { status: 500 });
   }
 
   try {
-    // 2. 获取所有订阅和通知内容
     const allSubscriptionStrings = await kv.smembers("subscriptions");
     const notificationPayload = await request.json();
     const payloadString = JSON.stringify(notificationPayload);
 
-    if (allSubscriptionStrings.length === 0) {
-        return NextResponse.json({ success: true, message: "No active subscriptions to notify." });
-    }
-
-    // 3. 准备并发送所有推送
-    const pushPromises = allSubscriptionStrings.map((subStr) => {
-      const subscription = JSON.parse(subStr);
-      return webPush
-        .sendNotification(subscription, payloadString)
-        .catch(async (error) => {
-          if (error.statusCode === 410) {
-            console.log("Subscription expired, removing:", subscription.endpoint);
-            await kv.srem("subscriptions", subStr);
-          } else {
-            console.error(`Failed to send to ${subscription.endpoint}:`, error);
-          }
-        });
+    const pushPromises = allSubscriptionStrings.map(subStr => {
+      try {
+        // 在这里进行保护性解析
+        const subscription = JSON.parse(subStr);
+        return webPush
+          .sendNotification(subscription, payloadString)
+          .catch(async (error) => {
+            if (error.statusCode === 410) {
+              console.log("Subscription expired, removing:", subscription.endpoint);
+              await kv.srem("subscriptions", subStr);
+            } else {
+              console.error(`Failed to send to ${subscription.endpoint}:`, error.body);
+            }
+          });
+      } catch (e) {
+        console.error("Skipping invalid subscription data from DB:", subStr);
+        // 如果解析失败，就跳过这条损坏的数据
+        return Promise.resolve();
+      }
     });
 
     await Promise.all(pushPromises);
