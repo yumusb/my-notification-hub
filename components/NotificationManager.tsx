@@ -19,7 +19,7 @@ export function NotificationManager() {
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
+
   // --- 新增状态：用于处理测试按钮的加载状态 ---
   const [isTesting, setIsTesting] = useState(false);
 
@@ -31,9 +31,21 @@ export function NotificationManager() {
           throw new Error("此浏览器不支持推送通知功能。");
         }
         await navigator.serviceWorker.register("/sw.js");
-        await navigator.serviceWorker.ready;
-        const subscription = await navigator.serviceWorker.ready.then(reg => reg.pushManager.getSubscription());
+        const registration = await navigator.serviceWorker.ready;
+        const subscription = await registration.pushManager.getSubscription();
+
         if (subscription) {
+          // 同步订阅到后端，保持服务端数据最新
+          const res = await fetch("/api/subscribe", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(subscription),
+          });
+
+          if (!res.ok) {
+            throw new Error("同步订阅到服务器失败。");
+          }
+
           setIsSubscribed(true);
         } else {
           setIsSubscribed(false);
@@ -45,8 +57,10 @@ export function NotificationManager() {
         setIsLoading(false);
       }
     };
+
     checkSubscriptionStatus();
   }, []);
+
 
   // handleSubscribe 函数保持不变...
   const handleSubscribe = async () => {
@@ -64,16 +78,16 @@ export function NotificationManager() {
       }
       const vapidPublicKey = await vapidPublicKeyRes.text();
       const subscription = await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
       });
       const subscribeRes = await fetch("/api/subscribe", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(subscription),
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(subscription),
       });
       if (!subscribeRes.ok) {
-          throw new Error("向服务器保存订阅信息失败。");
+        throw new Error("向服务器保存订阅信息失败。");
       }
       setIsSubscribed(true);
     } catch (err) {
@@ -116,7 +130,7 @@ export function NotificationManager() {
       setIsTesting(false);
     }
   };
-  
+
   // UI 渲染部分，增加了测试按钮
   if (isLoading) {
     return <div className="text-center text-gray-500">正在检查订阅状态...</div>;
@@ -142,10 +156,10 @@ export function NotificationManager() {
           <div className="text-center">
             <h2 className="text-2xl font-semibold text-green-600">🎉 订阅成功！</h2>
             <p className="mt-2 text-gray-600">你已准备好接收推送通知。</p>
-            
+
             {/* --- 新增的测试按钮 --- */}
             <div className="mt-6">
-              <button 
+              <button
                 onClick={handleTestPush}
                 disabled={isTesting}
                 className="px-5 py-2 font-medium text-white bg-gray-700 rounded-lg hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-colors disabled:bg-gray-400"
