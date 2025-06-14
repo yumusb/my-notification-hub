@@ -1,6 +1,6 @@
 import { kv } from "@vercel/kv";
 import { NextRequest, NextResponse } from "next/server";
-import webPush from "web-push";
+import webPush, { PushSubscription } from "web-push";
 
 if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
   webPush.setVapidDetails(
@@ -33,18 +33,14 @@ export async function POST(request: NextRequest) {
     const pushPromises = endpoints.map(async (endpoint: string) => {
       try {
         // 根据 endpoint 拿对应的 subscription 数据
-        const subRaw = await kv.get<string>(`subscription:${endpoint}`);
-        console.log("subRaw type:", typeof subRaw, "value:", subRaw);
-
+        const subRaw = await kv.get(`subscription:${endpoint}`);
         if (!subRaw) {
-          // 订阅不存在了，移除 endpoint 记录
+          // 处理订阅不存在
           await kv.srem("subscriptions_endpoints", endpoint);
           skipCount++;
           return;
         }
-
-        const subscription = JSON.parse(subRaw);
-
+        const subscription = subRaw as PushSubscription; // 明确断言为 web-push 的 PushSubscription 类型
         await webPush.sendNotification(subscription, payloadString);
         successCount++;
       } catch (error: any) {
