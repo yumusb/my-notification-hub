@@ -92,10 +92,20 @@ self.addEventListener("notificationclick", (event) => {
         const targetUrl = new URL(urlToOpen);
         return clientUrl.pathname === targetUrl.pathname;
       });
-
       if (matchingClient) {
+        console.log("Found matching client, focusing it");
+        // 如果找到匹配的客户端，则聚焦它
+        console.log("Focusing client:", matchingClient.url);
+        // 确保客户端的 URL 是绝对路径
         return matchingClient.focus();
       } else {
+        // 如果没有匹配的客户端，则打开新的窗口
+        console.log("Opening new window for notification");
+        if (clients.openWindow) {
+          console.log("Opening URL:", urlToOpen);
+        } else {
+          console.warn("clients.openWindow is not available");
+        }
         return clients.openWindow(urlToOpen);
       }
     })
