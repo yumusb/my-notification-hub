@@ -34,6 +34,8 @@ export async function POST(request: NextRequest) {
       try {
         // 根据 endpoint 拿对应的 subscription 数据
         const subRaw = await kv.get<string>(`subscription:${endpoint}`);
+        console.log("subRaw type:", typeof subRaw, "value:", subRaw);
+
         if (!subRaw) {
           // 订阅不存在了，移除 endpoint 记录
           await kv.srem("subscriptions_endpoints", endpoint);
