@@ -1,9 +1,7 @@
-// components/NotificationManager.tsx (最终版，包含测试按钮)
 "use client";
 
 import { useEffect, useState } from "react";
 
-// 辅助函数保持不变
 function urlBase64ToUint8Array(base64String: string) {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -20,10 +18,10 @@ export function NotificationManager() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // --- 新增状态：用于处理测试按钮的加载状态 ---
   const [isTesting, setIsTesting] = useState(false);
+  // 新增状态，取消订阅按钮加载状态
+  const [isUnsubscribing, setIsUnsubscribing] = useState(false);
 
-  // 检查订阅状态的 useEffect 保持不变...
   useEffect(() => {
     const checkSubscriptionStatus = async () => {
       try {
@@ -35,17 +33,14 @@ export function NotificationManager() {
         const subscription = await registration.pushManager.getSubscription();
 
         if (subscription) {
-          // 同步订阅到后端，保持服务端数据最新
           const res = await fetch("/api/subscribe", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(subscription),
           });
-
           if (!res.ok) {
             throw new Error("同步订阅到服务器失败。");
           }
-
           setIsSubscribed(true);
         } else {
           setIsSubscribed(false);
@@ -61,8 +56,6 @@ export function NotificationManager() {
     checkSubscriptionStatus();
   }, []);
 
-
-  // handleSubscribe 函数保持不变...
   const handleSubscribe = async () => {
     setIsLoading(true);
     setError(null);
@@ -98,7 +91,40 @@ export function NotificationManager() {
     }
   };
 
-  // --- 新增函数：处理测试推送按钮的点击事件 ---
+  // --- 新增取消订阅函数 ---
+  const handleUnsubscribe = async () => {
+    setIsUnsubscribing(true);
+    setError(null);
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      if (!subscription) {
+        throw new Error("当前没有订阅。");
+      }
+      // 取消订阅
+      const unsubscribed = await subscription.unsubscribe();
+      if (!unsubscribed) {
+        throw new Error("取消订阅失败。");
+      }
+      // 通知后端取消订阅
+      const res = await fetch("/api/unsubscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(subscription),
+      });
+      if (!res.ok) {
+        throw new Error("通知服务器取消订阅失败。");
+      }
+      setIsSubscribed(false);
+      alert("取消订阅成功。");
+    } catch (err) {
+      console.error("取消订阅失败:", err);
+      setError(err instanceof Error ? `取消订阅失败: ${err.message}` : "取消订阅过程中发生未知错误。");
+    } finally {
+      setIsUnsubscribing(false);
+    }
+  };
+
   const handleTestPush = async () => {
     setIsTesting(true);
     try {
@@ -106,13 +132,12 @@ export function NotificationManager() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          // 使用环境变量中的 API Key 进行授权
           "Authorization": `Bearer ${process.env.NEXT_PUBLIC_API_SECRET_KEY}`
         },
         body: JSON.stringify({
           title: "来自网页的测试",
           body: "点击按钮发送成功！这是一个测试通知。",
-          url: window.location.href // 点击通知后打开当前页面
+          url: window.location.href
         }),
       });
 
@@ -131,10 +156,12 @@ export function NotificationManager() {
     }
   };
 
-  // UI 渲染部分，增加了测试按钮
   if (isLoading) {
     return <div className="text-center text-gray-500">正在检查订阅状态...</div>;
   }
+
+  // 动态获取当前域名，替换 curl 里的 <你的Vercel域名>
+  const currentHost = typeof window !== "undefined" ? window.location.host : "<你的Vercel域名>";
 
   return (
     <div className="p-8 bg-white rounded-lg shadow-md">
@@ -157,8 +184,8 @@ export function NotificationManager() {
             <h2 className="text-2xl font-semibold text-green-600">🎉 订阅成功！</h2>
             <p className="mt-2 text-gray-600">你已准备好接收推送通知。</p>
 
-            {/* --- 新增的测试按钮 --- */}
-            <div className="mt-6">
+            <div className="mt-6 space-x-4">
+              {/* 测试按钮 */}
               <button
                 onClick={handleTestPush}
                 disabled={isTesting}
@@ -166,8 +193,16 @@ export function NotificationManager() {
               >
                 {isTesting ? '发送中...' : '发送测试通知'}
               </button>
+
+              {/* 新增取消订阅按钮 */}
+              <button
+                onClick={handleUnsubscribe}
+                disabled={isUnsubscribing}
+                className="px-5 py-2 font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-colors disabled:bg-gray-400"
+              >
+                {isUnsubscribing ? '取消中...' : '取消订阅'}
+              </button>
             </div>
-            {/* --- 测试按钮结束 --- */}
 
           </div>
           <div className="pt-6 border-t">
@@ -178,7 +213,7 @@ export function NotificationManager() {
             <pre className="p-4 bg-gray-900 text-white rounded-md overflow-x-auto text-sm">
               <code>
                 {`curl -X POST \\
-  https://<你的Vercel域名>/api/notify \\
+  https://${currentHost}/api/notify \\
   -H "Authorization: Bearer ${process.env.NEXT_PUBLIC_API_SECRET_KEY}" \\
   -H "Content-Type: application/json" \\
   -d '{
