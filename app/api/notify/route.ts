@@ -1,0 +1,57 @@
+import { kv } from "@vercel/kv";
+import { NextRequest, NextResponse } from "next/server";
+import webPush from "web-push";
+
+// 在函数外部配置，只需一次
+if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+  webPush.setVapidDetails(
+    "mailto:your-email@example.com", // 替换成你的邮箱
+    process.env.VAPID_PUBLIC_KEY,
+    process.env.VAPID_PRIVATE_KEY
+  );
+}
+
+export async function POST(request: NextRequest) {
+  // 1. 验证身份
+  const authHeader = request.headers.get("authorization");
+  if (authHeader !== `Bearer ${process.env.API_SECRET_KEY}`) {
+    return new Response("Unauthorized.", { status: 401 });
+  }
+
+  if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
+      return new Response("VAPID keys are not configured.", { status: 500 });
+  }
+
+  try {
+    // 2. 获取所有订阅和通知内容
+    const allSubscriptionStrings = await kv.smembers("subscriptions");
+    const notificationPayload = await request.json();
+    const payloadString = JSON.stringify(notificationPayload);
+
+    if (allSubscriptionStrings.length === 0) {
+        return NextResponse.json({ success: true, message: "No active subscriptions to notify." });
+    }
+
+    // 3. 准备并发送所有推送
+    const pushPromises = allSubscriptionStrings.map((subStr) => {
+      const subscription = JSON.parse(subStr);
+      return webPush
+        .sendNotification(subscription, payloadString)
+        .catch(async (error) => {
+          if (error.statusCode === 410) {
+            console.log("Subscription expired, removing:", subscription.endpoint);
+            await kv.srem("subscriptions", subStr);
+          } else {
+            console.error(`Failed to send to ${subscription.endpoint}:`, error);
+          }
+        });
+    });
+
+    await Promise.all(pushPromises);
+
+    return NextResponse.json({ success: true, message: "Notifications sent successfully." });
+  } catch (error) {
+    console.error("Error sending notifications:", error);
+    return new Response("Failed to send notifications.", { status: 500 });
+  }
+}
