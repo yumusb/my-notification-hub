@@ -14,15 +14,58 @@ function urlBase64ToUint8Array(base64String: string) {
 }
 
 export function NotificationManager() {
+  const [apiKey, setApiKey] = useState<string | null>(null);
+  const [inputKey, setInputKey] = useState("");
+  const [isVerifyingKey, setIsVerifyingKey] = useState(true);
+
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isUnsubscribing, setIsUnsubscribing] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [isTesting, setIsTesting] = useState(false);
-  // 新增状态，取消订阅按钮加载状态
-  const [isUnsubscribing, setIsUnsubscribing] = useState(false);
-
+  // 初始加载时从 localStorage 获取密钥并验证
   useEffect(() => {
+    const storedKey = localStorage.getItem("notification_api_key");
+    if (storedKey) {
+      verifyApiKey(storedKey);
+    } else {
+      setIsVerifyingKey(false);
+    }
+  }, []);
+
+  // 验证 API 密钥是否有效
+  const verifyApiKey = async (key: string) => {
+    setIsVerifyingKey(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/vapid-public-key", {
+        headers: {
+          Authorization: `Bearer ${key}`,
+        },
+      });
+      if (!res.ok) throw new Error("API 密钥无效。");
+      setApiKey(key);
+      localStorage.setItem("notification_api_key", key);
+    } catch (err) {
+      console.error("密钥验证失败:", err);
+      setError(err instanceof Error ? err.message : "发生未知错误。");
+      localStorage.removeItem("notification_api_key");
+      setApiKey(null);
+    } finally {
+      setIsVerifyingKey(false);
+    }
+  };
+
+  // 手动提交 API 密钥
+  const handleKeySubmit = async () => {
+    await verifyApiKey(inputKey.trim());
+  };
+
+  // 订阅状态检查（已通过密钥验证后才会执行）
+  useEffect(() => {
+    if (!apiKey) return;
+
     const checkSubscriptionStatus = async () => {
       try {
         if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
@@ -35,12 +78,13 @@ export function NotificationManager() {
         if (subscription) {
           const res = await fetch("/api/subscribe", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey}`,
+            },
             body: JSON.stringify(subscription),
           });
-          if (!res.ok) {
-            throw new Error("同步订阅到服务器失败。");
-          }
+          if (!res.ok) throw new Error("同步订阅到服务器失败。");
           setIsSubscribed(true);
         } else {
           setIsSubscribed(false);
@@ -54,34 +98,39 @@ export function NotificationManager() {
     };
 
     checkSubscriptionStatus();
-  }, []);
+  }, [apiKey]);
 
   const handleSubscribe = async () => {
     setIsLoading(true);
     setError(null);
     try {
       const permission = await Notification.requestPermission();
-      if (permission !== "granted") {
-        throw new Error("你拒绝了通知授权，无法订阅。");
-      }
+      if (permission !== "granted") throw new Error("你拒绝了通知授权，无法订阅。");
+
       const registration = await navigator.serviceWorker.ready;
-      const vapidPublicKeyRes = await fetch('/api/vapid-public-key');
-      if (!vapidPublicKeyRes.ok) {
-        throw new Error('无法从服务器获取 VAPID 公钥。');
-      }
-      const vapidPublicKey = await vapidPublicKeyRes.text();
+      const vapidRes = await fetch("/api/vapid-public-key", {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+      });
+      if (!vapidRes.ok) throw new Error("无法从服务器获取 VAPID 公钥。");
+
+      const vapidPublicKey = await vapidRes.text();
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
       });
+
       const subscribeRes = await fetch("/api/subscribe", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
         body: JSON.stringify(subscription),
       });
-      if (!subscribeRes.ok) {
-        throw new Error("向服务器保存订阅信息失败。");
-      }
+
+      if (!subscribeRes.ok) throw new Error("向服务器保存订阅信息失败。");
       setIsSubscribed(true);
     } catch (err) {
       console.error("订阅过程中发生错误:", err);
@@ -91,30 +140,28 @@ export function NotificationManager() {
     }
   };
 
-  // --- 新增取消订阅函数 ---
   const handleUnsubscribe = async () => {
     setIsUnsubscribing(true);
     setError(null);
     try {
       const registration = await navigator.serviceWorker.ready;
       const subscription = await registration.pushManager.getSubscription();
-      if (!subscription) {
-        throw new Error("当前没有订阅。");
-      }
-      // 取消订阅
+      if (!subscription) throw new Error("当前没有订阅。");
+
       const unsubscribed = await subscription.unsubscribe();
-      if (!unsubscribed) {
-        throw new Error("取消订阅失败。");
-      }
-      // 通知后端取消订阅
+      if (!unsubscribed) throw new Error("取消订阅失败。");
+
       const res = await fetch("/api/unsubscribe", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
         body: JSON.stringify(subscription),
       });
-      if (!res.ok) {
-        throw new Error("通知服务器取消订阅失败。");
-      }
+
+      if (!res.ok) throw new Error("通知服务器取消订阅失败。");
+
       setIsSubscribed(false);
       alert("取消订阅成功。");
     } catch (err) {
@@ -132,12 +179,12 @@ export function NotificationManager() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${process.env.NEXT_PUBLIC_API_SECRET_KEY}`
+          Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
           title: "来自网页的测试",
           body: "点击按钮发送成功！这是一个测试通知。",
-          url: window.location.href
+          url: window.location.href,
         }),
       });
 
@@ -147,7 +194,6 @@ export function NotificationManager() {
       }
 
       alert("测试通知已发送！请在几秒钟内查看你的桌面。");
-
     } catch (err) {
       console.error("测试推送失败:", err);
       alert(err instanceof Error ? err.message : "发生未知错误");
@@ -156,11 +202,33 @@ export function NotificationManager() {
     }
   };
 
-  if (isLoading) {
-    return <div className="text-center text-gray-500">正在检查订阅状态...</div>;
+  // API 密钥输入视图
+  if (!apiKey && !isVerifyingKey) {
+    return (
+      <div className="p-8 bg-white rounded-lg shadow-md text-center">
+        <h2 className="text-xl font-semibold mb-4">请输入你的 API 密钥</h2>
+        <input
+          type="password"
+          placeholder="API 密钥"
+          className="border p-2 rounded w-full mb-4"
+          value={inputKey}
+          onChange={(e) => setInputKey(e.target.value)}
+        />
+        <button
+          onClick={handleKeySubmit}
+          className="px-5 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+        >
+          验证密钥
+        </button>
+        {error && <p className="text-red-600 mt-4">{error}</p>}
+      </div>
+    );
   }
 
-  // 动态获取当前域名，替换 curl 里的 <你的Vercel域名>
+  if (isVerifyingKey || isLoading) {
+    return <div className="text-center text-gray-500">正在验证身份或加载订阅状态...</div>;
+  }
+
   const currentHost = typeof window !== "undefined" ? window.location.host : "<你的Vercel域名>";
 
   return (
@@ -185,7 +253,6 @@ export function NotificationManager() {
             <p className="mt-2 text-gray-600">你已准备好接收推送通知。</p>
 
             <div className="mt-6 space-x-4">
-              {/* 测试按钮 */}
               <button
                 onClick={handleTestPush}
                 disabled={isTesting}
@@ -194,7 +261,6 @@ export function NotificationManager() {
                 {isTesting ? '发送中...' : '发送测试通知'}
               </button>
 
-              {/* 新增取消订阅按钮 */}
               <button
                 onClick={handleUnsubscribe}
                 disabled={isUnsubscribing}
@@ -203,8 +269,8 @@ export function NotificationManager() {
                 {isUnsubscribing ? '取消中...' : '取消订阅'}
               </button>
             </div>
-
           </div>
+
           <div className="pt-6 border-t">
             <h3 className="text-lg font-semibold mb-2">你的 API 信息</h3>
             <p className="text-sm text-gray-600 mb-4">
@@ -214,7 +280,7 @@ export function NotificationManager() {
               <code>
                 {`curl -X POST \\
   https://${currentHost}/api/notify \\
-  -H "Authorization: Bearer ${process.env.NEXT_PUBLIC_API_SECRET_KEY}" \\
+  -H "Authorization: Bearer ${apiKey}" \\
   -H "Content-Type: application/json" \\
   -d '{
         "title": "测试标题",
