@@ -206,7 +206,7 @@ export function NotificationManager() {
   if (!apiKey && !isVerifyingKey) {
     return (
       <div className="p-8 bg-white rounded-lg shadow-md text-center">
-        <h2 className="text-xl font-semibold mb-4">请输入你的 API 密钥</h2>
+        <h2 className="text-xl font-semibold mb-4">请输入你的 API 密钥(API_SECRET_KEY)</h2>
         <input
           type="password"
           placeholder="API 密钥"
